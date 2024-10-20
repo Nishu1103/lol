@@ -619,4 +619,4 @@ server.listen(3001, () => {
     console.log('Server running on port 3000');
 })
 
- 
+ export default app;
