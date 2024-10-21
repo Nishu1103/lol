@@ -408,18 +408,17 @@ app.get('/messages/:receiverId', verifyToken, async (req, res) => {
 io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
 
+    // Register a user to a room
     socket.on('registerUser', (userId) => {
         console.log(`Registering user with userId: ${userId}`);
-        socket.join(userId);
+        socket.join(userId);  // Add the user to a room based on their userId
     });
 
+    // Handle message sending
     socket.on('sendMessage', ({ receiverId, message, senderId }) => {
         console.log(`Message from ${senderId} to ${receiverId}: ${message}`);
-        // Emit to the receiver's room
-        socket.to(receiverId).emit('receiveMessage', {
-            senderId: senderId,
-            message: message
-        });
+        // Emit message to the receiver's room
+        socket.to(receiverId).emit('receiveMessage', { senderId, message });
     });
 
     socket.on('disconnect', () => {
@@ -438,8 +437,6 @@ app.post('/send-message', verifyToken, async (req, res) => {
             [senderId, receiverId, receiverId, senderId]
         );
 
-        console.log(`SenderId: ${senderId}, ReceiverId: ${receiverId} - Match check: `, matchCheck);
-
         if (matchCheck.length === 0) {
             return res.status(400).json({ message: 'You can only message matched users.' });
         }
@@ -447,10 +444,8 @@ app.post('/send-message', verifyToken, async (req, res) => {
         // Insert the message into the database
         await pool.query('INSERT INTO messages (sender_id, receiver_id, message) VALUES (?, ?, ?)', [senderId, receiverId, message]);
 
-        // Emit the message to the receiver through Socket.io
+        // Emit the message to the receiver through Socket.IO
         io.to(receiverId).emit('receiveMessage', { senderId, message });
-        console.log(`Message emitted to receiverId: ${receiverId} with content: "${message}"`);
-
         res.status(201).json({ message: 'Message sent successfully!' });
     } catch (error) {
         console.error("Error sending message:", error);
