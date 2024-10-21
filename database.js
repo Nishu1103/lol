@@ -676,7 +676,7 @@ app.post('/invitePromPartner', verifyToken, async (req, res) => {
         );
 
         // Create the invitation link
-        const inviteLink = `http://localhost:5173/prom-invite/${uniqueCode}`;
+        const inviteLink = `https://prom-iota.vercel.app/prom-invite/${uniqueCode}`;
 
         // Send the invitation email
         const mailOptions = {
