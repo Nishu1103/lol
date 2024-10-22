@@ -76,38 +76,66 @@ function verifyToken(req, res, next) {
 app.post("/register", upload.single('profileImage1'), async (req, res) => {
     try {
         console.log("req body is ", req.body);
-        const { name, email, password, rollNo,year, hall, PhoneNO, age, gender, bio, profileImage1, profileImage2 } = req.body;
+        const { name, email, password, rollNo, year, hall, PhoneNo, age, gender, bio, profileImage1, profileImage2 } = req.body;
         console.log("Received data:", {
             name,
             email,
             age,
-
+            rollNo,
+            hall,
+            year,
             gender,
             bio,
+            PhoneNo,
             profileImage1,
             profileImage2
         });
 
-        if (!name || !year || !hall || !email || !rollNo || !PhoneNO || !password || age === undefined || !gender || !bio || !profileImage1 || !profileImage2) {
+        // Validate required fields
+        if (!name || !year || !hall || !email || !rollNo || !PhoneNo || !password || age === undefined || !gender || !bio || !profileImage1 || !profileImage2) {
             return res.status(400).json({ error: "All fields are required." });
         }
 
-        const hashedPassword = bcrypt.hashSync(password, 10);
-        const [user] = await pool.query("select * from users where email=?", [email]);
-        console.log("email id is", user);
-        if (user.length > 0) {
-            return res.status(301).json({ message: "Email Already Exists" });
+        // Check if email, PhoneNo, or rollNo already exists
+        const [existingUser] = await pool.query(
+            "SELECT * FROM users WHERE email = ? OR PhoneNo = ? OR rollNo = ?",
+            [email, PhoneNo, rollNo]
+        );
+
+        if (existingUser.length > 0) {
+            // Determine which field already exists
+            if (existingUser.some(user => user.email === email)) {
+                return res.status(409).json({ message: "Email already exists." });
+            } else if (existingUser.some(user => user.PhoneNo === PhoneNo)) {
+                return res.status(409).json({ message: "Phone number already exists." });
+            } else if (existingUser.some(user => user.rollNo === rollNo)) {
+                return res.status(409).json({ message: "Roll number already exists." });
+            }
         }
-        const result = await pool.query('INSERT INTO users (name, email, password, age, gender, bio, profile_image,profile_image_secondary) VALUES (?, ?, ?, ?, ?, ?,?,?)', [name, email, hashedPassword, age, gender, bio, profileImage1, profileImage2],)
+
+        // Hash password
+        const hashedPassword = bcrypt.hashSync(password, 10);
+
+        // Insert new user
+        const result = await pool.query(
+            'INSERT INTO users (name, year, PhoneNo, rollNo, email, password, age, gender, bio, profile_image, profile_image_secondary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, year, PhoneNo, rollNo, email, hashedPassword, age, gender, bio, profileImage1, profileImage2]
+        );
+
         const userId = result[0].insertId;
-        res.status(201).json({ message: "User Registered Succesfully", user: { userId, name, email, age, gender, bio, profileImage1, profileImage2 } });
+
+        // Respond with success
+        res.status(201).json({
+            message: "User Registered Successfully",
+            user: { userId, name, rollNo, year, hall, PhoneNo, email, age, gender, bio, profileImage1, profileImage2 }
+        });
 
     } catch (error) {
         console.error("Error inserting user:", error);
         res.status(500).json({ error: "Database error" });
-
     }
-})
+});
+
 
 app.post("/login", async (req, res) => {
     try {
@@ -320,52 +348,6 @@ app.get('/user', verifyToken, async (req, res) => {
 
 
 
-// app.post('/messages', verifyToken, async (req, res) => {
-//     const { receiverId, message } = req.body;
-//     const senderId = req.userId;
-//     console.log(senderId);
-
-//     try {
-//         // Check if the users are matched
-//         const [matchCheck] = await pool.query(
-//             'select * from matches where (user_one_id = ? AND user_two_id = ?) OR (user_one_id = ? AND user_two_id = ?)',
-//             [senderId, receiverId, receiverId, senderId]
-//         );
-
-//         if (matchCheck.length === 0) {
-//             return res.status(400).json({ message: 'You can only message matched users.' });
-//         }
-
-//         // Insert the message into the database
-//         await pool.query('insert into messages (sender_id, receiver_id, message) VALUES (?, ?, ?)', [senderId, receiverId, message]);
-
-//         // Emit the message to the receiver through Socket.io
-//         io.to(receiverId).emit('receiveMessage', { senderId, message });
-//         console.log(receiverId);
-
-//         res.status(200).json({ message: 'Message sent successfully!' });
-
-//     } catch (error) {
-//         console.error("Error sending message:", error);
-//         res.status(500).json({ message: 'Server error' });
-//     }
-// });
-
-
-// io.on('connection', (socket) => {
-//     console.log('User connected:', socket.id);
-
-
-//     socket.on('registerUser', (userId) => {
-//         socket.join(userId);
-//     });
-
-//     socket.on('disconnect', () => {
-//         console.log('User disconnected:', socket.id);
-//     });
-// });
-
-
 // Add this API to fetch chat history between two users
 app.get('/messages/:receiverId', verifyToken, async (req, res) => {
     const userId = req.userId;
@@ -503,7 +485,7 @@ app.post('/requestPromNight', verifyToken, async (req, res) => {
             [receiverId, receiverId]
         );
         if (receiverAcceptedRequest.length > 0) {
-            return res.status(409).json({ message: 'The requested user is already matched with someone' });
+            return res.status(408).json({ message: 'The requested user is already matched with someone' });
         }
 
         // Check if the requested user exists
@@ -518,7 +500,7 @@ app.post('/requestPromNight', verifyToken, async (req, res) => {
             [senderId, receiverId]
         );
         if (existingRequest.length > 0) {
-            return res.status(409).json({ message: 'Request already sent' });
+            return res.status(411).json({ message: 'Request already sent' });
         }
 
         // Insert a new prom night request
@@ -567,7 +549,7 @@ app.post('/acceptPromNight', verifyToken, async (req, res) => {
             [requesterId, requesterId]
         );
         if (requesterAcceptedRequest.length > 0) {
-            return res.status(409).json({ message: 'Requester is already matched with someone' });
+            return res.status(408).json({ message: 'Requester is already matched with someone' });
         }
 
         // Accept the request
