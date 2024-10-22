@@ -163,18 +163,59 @@ app.post("/login", async (req, res) => {
 
     }
 })
-app.get("/getUser", verifyToken, async (req, res) => {
+// app.get("/getUser", verifyToken, async (req, res) => {
+//     try {
+//         const userId = req.userId;
+//         console.log("userID is ", userId);
+//         const [result] = await pool.query("select * from users where id=?", [userId]);
+//         console.log("user is ", result);
+//         res.status(200).json({ message: "Got User", data: result });
+//     } catch (error) {
+//         console.error('error getting user', error);
+//         res.status(500).send("Error getting user");
+//     }
+// })
+
+
+app.get("/getUsers", verifyToken, async (req, res) => {
     try {
         const userId = req.userId;
-        console.log("userID is ", userId);
-        const [result] = await pool.query("select * from users where id=?", [userId]);
-        console.log("user is ", result);
-        res.status(200).json({ message: "Got User", data: result });
+        console.log("user id is", userId);
+        
+        const [user] = await pool.query("SELECT gender FROM users WHERE id = ?", [userId]);
+        const currentUserGender = user[0].gender;
+        let oppositeGender;
+
+     
+        if (currentUserGender === 'male') {
+            oppositeGender = 'female';
+        } else if (currentUserGender === 'female') {
+            oppositeGender = 'male';
+        } else {
+            return res.status(400).json({ message: "Invalid gender" });
+        }
+ 
+        const [liked] = await pool.query("SELECT liked_user_id FROM likes WHERE user_id = ?", [userId]);
+        const [disliked] = await pool.query("SELECT disliked_user_id FROM dislikes WHERE user_id = ?", [userId]);
+        
+        const likedUserIds = liked.map(row => row.liked_user_id);
+        const dislikedUserIds = disliked.map(row => row.disliked_user_id);
+        const excludedUserIds = [...likedUserIds, ...dislikedUserIds, userId];
+
+       
+        let query = "SELECT * FROM users WHERE gender = ? AND id NOT IN (?)";
+        const values = [oppositeGender, excludedUserIds];
+
+        const [rows] = await pool.query(query, values);
+
+        return res.status(200).json({ message: "Users List", data: rows });
+
     } catch (error) {
-        console.error('error getting user', error);
-        res.status(500).send("Error getting user");
+        console.error("Error getting users", error);
+        res.status(500).send("User not Found");
     }
-})
+});
+
 
 app.post("/Dp", async (req, res) => {
     try {
