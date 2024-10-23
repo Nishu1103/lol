@@ -439,65 +439,75 @@ app.get('/messages/:receiverId', verifyToken, async (req, res) => {
  
 
 // Server-side code using Node.js and Socket.io
-io.on('connection', (socket) => {
-    console.log('A user connected:', socket.id);
+const users = {}; // Store userId and socket.id mapping
 
+io.on('connection', (socket) => {
+    console.log('A user connected', socket.id);
 
     socket.on('registerUser', (userId) => {
-        console.log(userId)
-        socket.userId = userId;  // Store the userId with the socket
-        console.log(`Registering user with userId: ${userId}`);
+        users[userId] = socket.id;
+        console.log(`User with userId: ${userId} registered with socket id: ${socket.id}`);
     });
 
-    // Listen for sendMessage events
-    socket.on('sendMessage', ({ senderId, receiverId, message }) => {
-        console.log(`Message from ${senderId} to ${receiverId}: ${message}`);
-console.log(receiverId)
-        // Find the receiver's socket and emit the message to them
-        const receiverSocket = [...io.sockets.sockets.values()].find(
-            (s) => s.userId === receiverId
-        );
+    socket.on('sendMessage', (data) => {
+        const { receiverId, message, sender_id } = data;
+        const receiverSocketId = users[receiverId];
 
-
-        const allSockets = [...io.sockets.sockets.values()].map(s => ({ id: s.id, userId: s.userId }));
-// console.log("Connected sockets:", allSockets);
-
-
-        console.log(receiverSocket)
-
-        if (receiverSocket) {
-            receiverSocket.emit('receiveMessage', { senderId, message });
-            console.log(`Message emitted to receiverId: ${receiverId}`);
+        if (receiverSocketId) {
+            // Receiver is connected, send the message
+            io.to(receiverSocketId).emit('receiveMessage', { message, sender_id });
         } else {
             console.log(`User with receiverId: ${receiverId} not connected`);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        // Remove the socket when the user disconnects
+        for (let userId in users) {
+            if (users[userId] === socket.id) {
+                delete users[userId];
+                console.log(`User with userId: ${userId} disconnected`);
+                break;
+            }
         }
     });
 });
 
 
+
 app.post('/send-message', verifyToken, async (req, res) => {
     const { receiverId, message } = req.body;
-    const senderId = req.userId;
+    const sender_id = req.userId;
 
     try {
         // Check if users are matched
         const [matchCheck] = await pool.query(
             'SELECT * FROM matches WHERE (user_one_id = ? AND user_two_id = ?) OR (user_one_id = ? AND user_two_id = ?)',
-            [senderId, receiverId, receiverId, senderId]
+            [sender_id, receiverId, receiverId, sender_id]
         );
 
-        console.log(`SenderId: ${senderId}, ReceiverId: ${receiverId} - Match check: `, matchCheck);
+        console.log(`sender_id: ${sender_id}, ReceiverId: ${receiverId} - Match check: `, matchCheck);
 
         if (matchCheck.length === 0) {
             return res.status(400).json({ message: 'You can only message matched users.' });
         }
 
-        // Insert the message into the database
-        await pool.query('INSERT INTO messages (sender_id, receiver_id, message) VALUES (?, ?, ?)', [senderId, receiverId, message]);
+         
+        await pool.query('INSERT INTO messages (sender_id, receiver_id, message) VALUES (?, ?, ?)', [sender_id, receiverId, message]);
 
-        // Emit the message to the receiver through Socket.io
-        io.to(receiverId).emit('receiveMessage', { senderId, message });
-        console.log(`Message emitted to receiverId: ${receiverId} with content: "${message}"`);
+         
+        // io.to(receiverId).emit('receiveMessage', { senderId, message });
+        // console.log(`Message emitted to receiverId: ${receiverId} with content: "${message}"`);
+
+        const receiverSocket = [...io.sockets.sockets.values()].find(
+            (s) => s.userId === receiverId
+        );
+
+        if (receiverSocket) {
+            receiverSocket.emit('receiveMessage', { sender_id, message });
+            console.log(`Message emitted to receiverId: ${receiverId} with content: "${message}"`);
+        }
+
 
         res.status(201).json({ message: 'Message sent successfully!' });
     } catch (error) {
@@ -507,7 +517,6 @@ app.post('/send-message', verifyToken, async (req, res) => {
 });
 
 
-// Request Prom Night
 app.post('/requestPromNight', verifyToken, async (req, res) => {
     try {
         const { receiverId } = req.body; // ID of the person to whom the request is sent
@@ -517,6 +526,15 @@ app.post('/requestPromNight', verifyToken, async (req, res) => {
             "SELECT * FROM prom_night_requests WHERE (requester_id = ? OR requested_id = ?) AND status = 'accepted'",
             [senderId, senderId]
         );
+        const [existingPendingRequest] = await pool.query(
+            "SELECT * FROM prom_invitations WHERE (sender_id = ?) AND status = 'accepted'",
+            [senderId, senderId]            
+        )
+
+        if (existingPendingRequest.length > 0) {
+            return res.status(409).json({ message: 'You are already matched with someone' });
+        }
+
         if (existingAcceptedRequest.length > 0) {
             return res.status(409).json({ message: 'You are already matched with someone' });
         }
@@ -557,8 +575,6 @@ app.post('/requestPromNight', verifyToken, async (req, res) => {
     }
 });
 
-
-// Accept Prom Night Request
 app.post('/acceptPromNight', verifyToken, async (req, res) => {
     const { requestId } = req.body;
     const requestedId = req.userId;
@@ -570,6 +586,15 @@ app.post('/acceptPromNight', verifyToken, async (req, res) => {
             [requestedId, requestedId]
         );
         if (existingAcceptedRequest.length > 0) {
+            return res.status(409).json({ message: 'You are already matched with someone' });
+        }
+
+        const [existingPendingRequest] = await pool.query(
+            "SELECT * FROM prom_invitations WHERE (sender_id = ?) AND status = 'accepted'",
+            [senderId, senderId]            
+        )
+
+        if (existingPendingRequest.length > 0) {
             return res.status(409).json({ message: 'You are already matched with someone' });
         }
 
@@ -612,8 +637,6 @@ app.post('/acceptPromNight', verifyToken, async (req, res) => {
     }
 });
 
-
-// Cancel Prom Night
 app.post('/cancelPromNight', verifyToken, async (req, res) => {
     const { requestId } = req.body; // Change this to requestId
     const requestedId = req.userId;
@@ -638,7 +661,6 @@ app.post('/cancelPromNight', verifyToken, async (req, res) => {
     res.status(200).json({ message: 'Prom night request canceled!' });
 });
 
-// Check Prom Night Requests
 app.get('/promnight/check/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
@@ -654,8 +676,6 @@ app.get('/promnight/check/:userId', async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 });
-
-
 
 app.get('/likes/:userId', async (req, res) => {
     // const userId = req.user.id; // Assuming you have user ID from authentication middleware
@@ -706,7 +726,7 @@ app.post('/invitePromPartner', verifyToken, async (req, res) => {
             from: process.env.EMAIL_USER,
             to: partnerEmail,
             subject: "You're Invited to Prom Night!",
-            text: `Hello ${partnerName},\n\nYou have been invited to Prom Night! Please click on the link below to confirm your participation and fill out your details (name, hall, year, phone number):\n\n${inviteLink}\n\nThe invitation will expire once the form is completed.\n\nBest regards,\nProm Night Team`
+            text: `Hello ${partnerName},\n\nYou have been invited to Prom Night! Please click on the link below to confirm your participation and fill out your details (name, hall, year, phone number):\n\n${inviteLink}\n\n If you are new user then after successfully filling out the form your account will create\n\n Email address: ${partnerEmail}\n\n  password :- ${uniqueCode} \n\n \n\n The invitation will expire once the form is completed.\n\nBest regards,\nProm Night Team`
         };
 
         transporter.sendMail(mailOptions, (error, info) => {
@@ -724,12 +744,123 @@ app.post('/invitePromPartner', verifyToken, async (req, res) => {
     }
 });
 
-app.post('/promInvite/:inviteCode', async (req, res) => {
+const DEFAULT_PROFILE_IMAGE = 'QmatSLB6uquD2kxBpbKoxDN63F41fp8Xp8UdYboJdReG31';
+
+// app.post('/prom-invite/:inviteCode', async (req, res) => {
+
+//     const DEFAULT_PROFILE_IMAGE = 'QmatSLB6uquD2kxBpbKoxDN63F41fp8Xp8UdYboJdReG31';
+
+//     const { inviteCode } = req.params;
+//     const { name, hall, year, phoneNo, gender ,profile_image} = req.body;  
+
+//     try {
+//         // Step 1: Fetch the invitation using the invite code
+//         const [invitation] = await pool.query(
+//             "SELECT * FROM prom_invitations WHERE invite_code = ? AND status = 'pending'",
+//             [inviteCode]
+//         );
+
+//         // const [invitationid] = await pool.query(
+//         //     "SELECT * FROM prom_invitations WHERE sender_id = ? AND status = 'pending'",
+//         //     [invitationid]
+//         // );
+
+//         // const[meriid]=await pool.query(
+//         //     "SELECT id FROM users WHERE email = ?",
+//         //     [email]
+//         // );
+
+
+
+//         if (invitation.length === 0) {
+//             return res.status(404).json({ message: 'Invalid or expired invitation' });
+//         }
+
+//         const { sender_id, partner_email } = invitation[0]; // Get partner_email from invitation
+
+//         // Step 2: Check if the partner's email already exists in the users table
+//         const [existingUser] = await pool.query(
+//             "SELECT id FROM users WHERE email = ?",
+//             [partner_email]  
+//         );
+
+//         let partnerId;
+//         if (existingUser.length > 0) {
+//             // If the partner exists, retrieve their user ID
+//             partnerId = existingUser[0].id;
+//         } else {
+//             // If the partner doesn't exist, create a new user
+//             const hashedPassword = await bcrypt.hash(inviteCode, 10); // Hash the invite code as the password
+
+//             const [newUser] = await pool.query(
+//                 "INSERT INTO users (email, name, hall, year, phoneNo, gender, profile_image, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+//                 [
+//                     partner_email, // Use partner_email from the invitation
+//                     name,
+//                     hall,
+//                     year,
+//                     phoneNo,
+//                     gender,
+//                     profile_image || DEFAULT_PROFILE_IMAGE,  
+//                     hashedPassword // Store the hashed password
+//                 ]
+//             );
+
+//             partnerId = newUser.insertId; // Get the newly created user's ID
+//         }
+
+//         // Step 3: Update the invitation status to 'accepted'
+//         await pool.query(
+//             "UPDATE prom_invitations SET status = 'accepted', partner_details = ? WHERE invite_code = ?",
+//             [JSON.stringify({ name, hall, year, phoneNo, gender }), inviteCode]
+//         );
+
+//         // Step 4: Add the prom night request for the matched users
+//         await pool.query(
+//             "INSERT INTO prom_night_requests (requester_id, requested_id, status) VALUES (?, ?, 'accepted')",
+//             [sender_id, partnerId] // Use the new or existing user's ID as requested_id
+//         );
+
+//         // Notify that the invitation was accepted successfully
+//         res.status(201).json({ message: 'Invitation accepted and partner added successfully!' });
+
+//         const mailOptionspartner = {
+//             from: process.env.EMAIL_USER,
+//             to: partnerEmail,
+//             subject: "Prom Night!",
+//             text: `Hello ${partnerName},\n\nYou have been invited to Prom Night! Please click on the link below to confirm your participation and fill out your details (name, hall, year, phone number):\n\n${inviteLink}\n\n If you are new user then after successfully filling out the form your account will create\n\n Email address: ${partnerEmail}\n\n  password :- ${uniqueCode} \n\n \n\n The invitation will expire once the form is completed.\n\nBest regards,\nProm Night Team`
+//         };
+
+//         const mailOptionsme = {
+//             from: process.env.EMAIL_USER,
+//             to: partnerEmail,
+//             subject: "Prom Night",
+//             text: `Hello ${partnerName},\n\nYou have been invited to Prom Night! Please click on the link below to confirm your participation and fill out your details (name, hall, year, phone number):\n\n${inviteLink}\n\n If you are new user then after successfully filling out the form your account will create\n\n Email address: ${partnerEmail}\n\n  password :- ${uniqueCode} \n\n \n\n The invitation will expire once the form is completed.\n\nBest regards,\nProm Night Team`
+//         };
+
+//         transporter.sendMail(mailOptionsme, mailOptionspartner, (error, info) => {
+//             if (error) {
+//                 console.error("Error sending email:", error);
+//                 return res.status(500).json({ message: 'Error sending email' });
+//             }
+//             console.log("Email sent:", info.response);
+//             res.status(200).json({ message: 'Invitation sent successfully!' });
+//         });
+        
+
+//     } catch (error) {
+//         console.error("Error processing prom invite:", error);
+//         res.status(500).json({ message: 'Server error' });
+//     }
+// });
+
+app.post('/prom-invite/:inviteCode', async (req, res) => {
+    const DEFAULT_PROFILE_IMAGE = 'QmatSLB6uquD2kxBpbKoxDN63F41fp8Xp8UdYboJdReG31';
     const { inviteCode } = req.params;
-    const { name, hall, year, phoneNo } = req.body;
+    const { name, hall, year, phoneNo, gender, profile_image } = req.body;
 
     try {
-        // Fetch the invitation using the invite code
+        
         const [invitation] = await pool.query(
             "SELECT * FROM prom_invitations WHERE invite_code = ? AND status = 'pending'",
             [inviteCode]
@@ -739,36 +870,137 @@ app.post('/promInvite/:inviteCode', async (req, res) => {
             return res.status(404).json({ message: 'Invalid or expired invitation' });
         }
 
-        const { sender_id } = invitation[0];
+        const { sender_id, partner_email } = invitation[0];  
 
-        // Create a new user entry in the database for the partner
-        const [result] = await pool.query(
-            "INSERT INTO users (name, hall, year, phoneNo) VALUES (?, ?, ?, ?)",
-            [name, hall, year, phoneNo]
+      
+        const [existingUser] = await pool.query(
+            "SELECT id FROM users WHERE email = ?",
+            [partner_email]
         );
 
-        const newUserId = result.insertId;  // Get the newly created user's ID
+        let partnerId;
+        if (existingUser.length > 0) {
+            partnerId = existingUser[0].id;  
+        } else {
+            
+            const hashedPassword = await bcrypt.hash(inviteCode, 10);  
 
-        // Update the invitation status to 'accepted'
+            const [newUser] = await pool.query(
+                "INSERT INTO users (email, name, hall, year, phoneNo, gender, profile_image, password) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    partner_email,
+                    name,
+                    hall,
+                    year,
+                    phoneNo,
+                    gender,
+                    profile_image || DEFAULT_PROFILE_IMAGE,
+                    hashedPassword
+                ]
+            );
+
+            partnerId = newUser.insertId;  
+        }
+
+    
         await pool.query(
             "UPDATE prom_invitations SET status = 'accepted', partner_details = ? WHERE invite_code = ?",
-            [JSON.stringify({ name, hall, year, phoneNo }), inviteCode]
+            [JSON.stringify({ name, hall, year, phoneNo, gender }), inviteCode]
         );
 
-        // Add both users as matched for prom night
+         
         await pool.query(
             "INSERT INTO prom_night_requests (requester_id, requested_id, status) VALUES (?, ?, 'accepted')",
-            [sender_id, newUserId] // Use the new user's ID as requested_id
+            [sender_id, partnerId]
         );
 
-        // Notify the user that the invitation was accepted (if needed)
-        res.status(201).json({ message: 'Invitation accepted and form submitted successfully!' });
+       
+        const partnerEmail = partner_email;
+        const inviteLink = `${process.env.FRONTEND_URL}/prom-invite/${inviteCode}`;
+        const uniqueCode = inviteCode;  
+        const partnerName = name;  
+
+        const mailOptionsPartner = {
+            from: process.env.EMAIL_USER,
+            to: partnerEmail,
+            subject: "Prom Night Invitation Accepted!",
+            text: `Hello ${partnerName},\n\nYou have been successfully added as a participant in Prom Night! Your details have been recorded.\n\nBest regards,\nProm Night Team`
+        };
+
+         
+        const [sender] = await pool.query("SELECT email, name FROM users WHERE id = ?", [sender_id]);
+        const senderEmail = sender[0].email;
+        const senderName = sender[0].name;
+
+        const mailOptionsSender = {
+            from: process.env.EMAIL_USER,
+            to: senderEmail,
+            subject: "Your Prom Invitation was Accepted!",
+            text: `Hello ${senderName},\n\nYour prom night invitation was successfully accepted by ${partnerName}. Your prom date is now confirmed!\n\nBest regards,\nProm Night Team`
+        };
+
+         
+        transporter.sendMail(mailOptionsPartner, (error, info) => {
+            if (error) {
+                console.error("Error sending email to partner:", error);
+            } else {
+                console.log("Partner email sent:", info.response);
+            }
+        });
+
+        transporter.sendMail(mailOptionsSender, (error, info) => {
+            if (error) {
+                console.error("Error sending email to sender:", error);
+            } else {
+                console.log("Sender email sent:", info.response);
+            }
+        });
+
+        
+        res.status(201).json({ message: 'Invitation accepted, and emails sent to both participants!' });
 
     } catch (error) {
-        console.error("Error accepting invitation:", error);
+        console.error("Error processing prom invite:", error);
         res.status(500).json({ message: 'Server error' });
     }
 });
+
+
+app.get('/api/partner/:userId', verifyToken, async (req, res) => {
+    try {
+        const userId = req.params.userId;
+
+        // Step 1: Find the accepted prom request for the user
+        const [promRequest] = await pool.query(
+            "SELECT * FROM prom_night_requests WHERE (requested_id = ? OR requester_id = ?) AND status = 'accepted'",
+            [userId, userId]
+        );
+
+        if (promRequest.length === 0) {
+            return res.status(404).json({ message: 'No accepted prom request found for this user.' });
+        }
+
+        // Step 2: Identify the partner's ID
+        const partnerId = promRequest[0].requested_id === parseInt(userId) ? promRequest[0].requester_id : promRequest[0].requested_id;
+
+        // Step 3: Fetch the partner's details from the 'users' table
+        const [partnerDetails] = await pool.query(
+            "SELECT name, email, profile_image, rollno FROM users WHERE id = ?",
+            [partnerId]
+        );
+
+        if (partnerDetails.length === 0) {
+            return res.status(404).json({ message: 'Partner not found in users table.' });
+        }
+
+        // Step 4: Send the partner's details
+        res.status(200).json({ message: 'Partner details fetched successfully', partner: partnerDetails[0] });
+    } catch (error) {
+        console.error("Error fetching partner details:", error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
 
 
 
