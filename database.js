@@ -700,6 +700,18 @@ app.post('/invitePromPartner', verifyToken, async (req, res) => {
         const { partnerName, partnerEmail } = req.body;
         const senderId = req.userId;
 
+        const [senderDetails] = await pool.query(
+            "SELECT name, email, rollNo FROM users WHERE id = ?",
+            [senderId]
+        );
+
+        if (senderDetails.length === 0) {
+            return res.status(404).json({ message: 'Sender not found' });
+        }
+
+        const { name: senderName, email: senderEmail, rollNo: senderRollNo } = senderDetails[0];
+
+
         // Check if the user already has an accepted match
         const [existingAcceptedRequest] = await pool.query(
             "SELECT * FROM prom_night_requests WHERE (requester_id = ? OR requested_id = ?) AND status = 'accepted'",
@@ -709,24 +721,24 @@ app.post('/invitePromPartner', verifyToken, async (req, res) => {
             return res.status(409).json({ message: 'You are already matched with someone' });
         }
 
-        // Generate a unique code for this invitation
+         
         const uniqueCode = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
 
-        // Insert the invitation into the database
+         
         await pool.query(
             "INSERT INTO prom_invitations (sender_id, partner_name, partner_email, invite_code) VALUES (?, ?, ?, ?)",
             [senderId, partnerName, partnerEmail, uniqueCode]
         );
 
-        // Create the invitation link
+        
         const inviteLink = `https://prom-iota.vercel.app/prom-invite/${uniqueCode}`;
 
-        // Send the invitation email
+       
         const mailOptions = {
             from: "kumawatnishantk@gmail.com",
             to: partnerEmail,
             subject: "You're Invited to Prom Night!",
-            text: `Hello ${partnerName},\n\nYou have been invited to Prom Night! Please click on the link below to confirm your participation and fill out your details (name, hall, year, phone number):\n\n${inviteLink}\n\n If you are new user then after successfully filling out the form your account will create\n\n Email address: ${partnerEmail}\n\n  password :- ${uniqueCode} \n\n \n\n The invitation will expire once the form is completed.\n\nBest regards,\nProm Night Team`
+            text: `Hello ${partnerName},\n\nYou have been invited to Prom Night by ${senderName} (Email: ${senderEmail}, Roll No: ${senderRollNo}).\n\nPlease click on the link below to confirm your participation and fill out your details (name, hall, year, phone number):\n\n${inviteLink}\n\nIf you are a new user, an account will be created for you after successfully filling out the form.\n\nEmail address: ${partnerEmail}\n\nPassword: ${uniqueCode}\n\nThe invitation will expire once the form is completed.\n\nBest regards,\nProm Night Team`
         };
 
         transporter.sendMail(mailOptions, (error, info) => {
@@ -914,23 +926,31 @@ app.post('/prom-invite/:inviteCode', async (req, res) => {
             [sender_id, partnerId]
         );
 
-       
+        const [sender] = await pool.query("SELECT email, name, rollNo FROM users WHERE id = ?", [sender_id]);
         const partnerEmail = partner_email;
+        // const senderEmail = sender[0].email;
+        // const senderName = sender[0].name;
+        // const partnerName = name;
+        const senderRollNo = sender[0].rollNo;
+
+        const senderEmail = sender[0].email;
+        const senderName = sender[0].name;
+
         const inviteLink = `${process.env.FRONTEND_URL}/prom-invite/${inviteCode}`;
         const uniqueCode = inviteCode;  
         const partnerName = name;  
+        // const partnerEmail = partner_email;
 
         const mailOptionsPartner = {
             from: "kumawatnishantk@gmail.com",
             to: partnerEmail,
             subject: "Prom Night Invitation Accepted!",
-            text: `Hello ${partnerName},\n\nYou have been successfully added as a participant in Prom Night! Your details have been recorded.\n\nBest regards,\nProm Night Team`
+            text: `Hello ${partnerName},\n\nYou have been successfully added as a participant in Prom Night! You will be attending with ${senderName} (Roll No: ${senderRollNo}).\n\nBest regards,\nProm Night Team`
         };
 
          
-        const [sender] = await pool.query("SELECT email, name FROM users WHERE id = ?", [sender_id]);
-        const senderEmail = sender[0].email;
-        const senderName = sender[0].name;
+        // const [sender] = await pool.query("SELECT email, name FROM users WHERE id = ?", [sender_id]);
+       
 
         const mailOptionsSender = {
             from: "kumawatnishantk@gmail.com",
