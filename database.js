@@ -723,7 +723,7 @@ app.post('/invitePromPartner', verifyToken, async (req, res) => {
 
         // Send the invitation email
         const mailOptions = {
-            from: process.env.EMAIL_USER,
+            from: "kumawatnishantk@gmail.com",
             to: partnerEmail,
             subject: "You're Invited to Prom Night!",
             text: `Hello ${partnerName},\n\nYou have been invited to Prom Night! Please click on the link below to confirm your participation and fill out your details (name, hall, year, phone number):\n\n${inviteLink}\n\n If you are new user then after successfully filling out the form your account will create\n\n Email address: ${partnerEmail}\n\n  password :- ${uniqueCode} \n\n \n\n The invitation will expire once the form is completed.\n\nBest regards,\nProm Night Team`
@@ -921,7 +921,7 @@ app.post('/prom-invite/:inviteCode', async (req, res) => {
         const partnerName = name;  
 
         const mailOptionsPartner = {
-            from: process.env.EMAIL_USER,
+            from: "kumawatnishantk@gmail.com",
             to: partnerEmail,
             subject: "Prom Night Invitation Accepted!",
             text: `Hello ${partnerName},\n\nYou have been successfully added as a participant in Prom Night! Your details have been recorded.\n\nBest regards,\nProm Night Team`
@@ -933,7 +933,7 @@ app.post('/prom-invite/:inviteCode', async (req, res) => {
         const senderName = sender[0].name;
 
         const mailOptionsSender = {
-            from: process.env.EMAIL_USER,
+            from: "kumawatnishantk@gmail.com",
             to: senderEmail,
             subject: "Your Prom Invitation was Accepted!",
             text: `Hello ${senderName},\n\nYour prom night invitation was successfully accepted by ${partnerName}. Your prom date is now confirmed!\n\nBest regards,\nProm Night Team`
@@ -964,7 +964,6 @@ app.post('/prom-invite/:inviteCode', async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 });
-
 
 app.get('/api/partner/:userId', verifyToken, async (req, res) => {
     try {
