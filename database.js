@@ -823,6 +823,8 @@ app.get('/likes/:userId', async (req, res) => {
 //             return res.status(409).json({ message: 'You are already matched with someone' });
 //         }
 
+//         // partner id 
+        
 
 //         const [existingPartnerRequest] = await pool.query(
 //             "SELECT * FROM prom_night_requests WHERE (requester_id = ? OR requested_id = ?) AND status = 'accepted'",
@@ -914,17 +916,8 @@ app.post('/invitePromPartner', verifyToken, async (req, res) => {
             if (existingPartnerRequest.length > 0) {
                 return res.status(409).json({ message: 'Your partner is already matched with someone else' });
             }
-        } else {
-            // Partner doesn't exist, create a new user
-            const hashedPassword = await bcrypt.hash(Math.random().toString(36).substring(2, 15), 10);  // Generate a password
-
-            const [newUser] = await pool.query(
-                "INSERT INTO users (email, name, password) VALUES (?, ?, ?)",
-                [partnerEmail, partnerName, hashedPassword]
-            );
-            partnerId = newUser.insertId;
-        }
-
+        } 
+        // If the partner doesn't exist or not matched with anyone, send the email
         // Generate a unique invitation code
         let uniqueCode;
         let isUniqueCode = false;
@@ -945,13 +938,14 @@ app.post('/invitePromPartner', verifyToken, async (req, res) => {
 
         // Generate the invitation link
         const inviteLink = `https://prom-iota.vercel.app/prom-invite/${uniqueCode}`;
+        const link ='https://prom-iota.vercel.app/';
 
         // Prepare and send the email to the partner
         const mailOptions = {
             from: "kumawatnishantk@gmail.com",
             to: partnerEmail,
             subject: "You're Invited to Prom Night!",
-            text: `Hello ${partnerName},\n\nYou have been invited to Prom Night by ${senderName} (Email: ${senderEmail}, Roll No: ${senderRollNo}).\n\nPlease click on the link below to confirm your participation and fill out your details:\n\n${inviteLink}\n\nBest regards,\nProm Night Team`
+            text: `Hello ${partnerName},\n\nYou have been invited to Prom Night by ${senderName} (Email: ${senderEmail}, Roll No: ${senderRollNo}).\n\nPlease click on the link below to confirm your participation and fill out your details:\n\n${inviteLink}\n\nBest regards,\n\nIf you are a new user, your login details are as follows:\nLogin email: ${partnerEmail}\nPassword: ${uniqueCode}\n\nExplore the website: ${link}\n\nProm Night Team`
         };
 
         transporter.sendMail(mailOptions, (error, info) => {
@@ -968,6 +962,7 @@ app.post('/invitePromPartner', verifyToken, async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 });
+
 
 const DEFAULT_PROFILE_IMAGE = 'QmatSLB6uquD2kxBpbKoxDN63F41fp8Xp8UdYboJdReG31';
 
